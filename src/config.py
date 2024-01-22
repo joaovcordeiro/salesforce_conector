@@ -14,7 +14,7 @@ def get_salesforce_config():
     'export': os.getenv('SF_EXPORT') or '?isdtp=p1&export=1&enc=UTF-8&xf=csv',	
   }
 
-  if not all(credentials.values()):
+  if not all([credentials['username'], credentials['password'], credentials['security_token']]):
     raise Exception('Missing Salesforce credentials')
   
   return credentials

@@ -1,10 +1,11 @@
 from simple_salesforce import Salesforce
 from simple_salesforce import SalesforceAuthenticationFailed, SalesforceMalformedRequest
-from config import get_salesforce_config
+from src.config import get_salesforce_config
 import pandas as pd
 import requests
 import logging
 from io import StringIO
+import time
 
 class SalesforceExtractionError(Exception):
     def __init__(self, mensagem="An error occurred while extracting the report from Salesforce."):
@@ -30,13 +31,13 @@ class SalesforceConnection:
                     username=self.username,
                     password=self.password,
                     security_token=self.security_token,
-                    domain=self.domain
+                    domain=self.domain,
                 )
                 return self.sf
         except (SalesforceAuthenticationFailed, SalesforceMalformedRequest) as e:
-            raise Exception(f"Salesforce connection failed: {e}")
-        
-    def extract_data_report(self, report_id=None, export=None):
+            raise SalesforceExtractionError(f"Salesforce connection failed: {e}")
+
+    def extract_data_report(self, report_id=None, export=None, log_errors=True):
         if not self.sf:
             self.connect()
 
@@ -45,8 +46,8 @@ class SalesforceConnection:
         try:
             if not (self.report_id and self.instance_url):
                 raise ValueError("Salesforce report not configured")
-            
-            export = export or self.export 
+
+            export = export or self.export
             sf_url = self.instance_url + self.report_id + export
 
             response = requests.get(sf_url, headers=self.sf.headers, cookies={'sid': self.sf.session_id})
@@ -55,29 +56,44 @@ class SalesforceConnection:
             downloaded_data = response.content.decode('utf-8')
             df = pd.read_csv(StringIO(downloaded_data))
 
-            # Obtendo os metadados
             report_name = self.sf.query_all(f"SELECT Name FROM Report where Id = '{report_id}'")
             report_name = report_name['records'][0]['Name']
-            
+
             return df, report_name
-            
+
         except requests.exceptions.RequestException as e:
             # Handles exceptions related to HTTP requests (connection, timeout, etc.)
-            logging.error(f"Error during HTTP request: {e}")
+            if log_errors:
+                logging.error(f"Error during HTTP request: {e}")
             raise SalesforceExtractionError(f"Error during HTTP request: {e}")
-        
+
         except ValueError as e:
             # Handles exceptions related to invalid values
-            logging.error(f"Error during data extraction: {e}")
+            if log_errors:
+                logging.error(f"Error during data extraction: {e}")
             raise SalesforceExtractionError(f"Error during data extraction: {e}")
-        
-    def query(self, query):
-        pass
 
-    
-    def close_connection(self):
-        if self.sf:
-            self.sf.close()
-            self.sf = None
-            
- 
+    def query(self, query, log_errors=True):
+        if not isinstance(query, str):
+            raise ValueError("Query must be a string.")
+
+        if not self.sf:
+            self.connect()
+
+            try:
+                result = self.sf.query_all(query)
+                return result
+            except SalesforceAuthenticationFailed as e:
+                if log_errors:
+                    logging.error(f"Authentication error: {e}")
+                raise SalesforceExtractionError(f"Authentication error: {e}")
+            except SalesforceMalformedRequest as e:
+                if log_errors:
+                    logging.error(f"Malformed request error: {e}")
+                raise SalesforceExtractionError(f"Malformed request error: {e}")
+            except Exception as e:
+                if log_errors:
+                    logging.error(f"Unexpected error during query execution: {e}")
+                raise SalesforceExtractionError(f"Unexpected error during query execution: {e}")
+
+   
