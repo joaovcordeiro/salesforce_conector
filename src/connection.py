@@ -7,21 +7,26 @@ import logging
 from io import StringIO
 import time
 
+
 class SalesforceExtractionError(Exception):
-    def __init__(self, mensagem="An error occurred while extracting the report from Salesforce."):
+    def __init__(
+        self, mensagem="An error occurred while extracting the report from Salesforce."
+    ):
         self.mensagem = mensagem
         super().__init__(self.mensagem)
+
 
 class SalesforceConnection:
     def __init__(self):
         config = get_salesforce_config()
-        self.username = config['username']
-        self.password = config['password']
-        self.security_token = config['security_token']
-        self.domain = config['domain']
-        self.instance_url = config['instance_url']
-        self.report_id = config['report_id']
-        self.export = config['export']
+        self.username = config["username"]
+        self.password = config["password"]
+        self.security_token = config["security_token"]
+        self.domain = config["domain"]
+        self.instance_url = config["instance_url"]
+        self.report_id = config["report_id"]
+        self.export = config["export"]
+        self.querys = config["querys"]
         self.sf = None
 
     def connect(self):
@@ -50,14 +55,18 @@ class SalesforceConnection:
             export = export or self.export
             sf_url = self.instance_url + self.report_id + export
 
-            response = requests.get(sf_url, headers=self.sf.headers, cookies={'sid': self.sf.session_id})
+            response = requests.get(
+                sf_url, headers=self.sf.headers, cookies={"sid": self.sf.session_id}
+            )
             response.raise_for_status()  # Raises an exception for HTTP status codes other than 2xx
 
-            downloaded_data = response.content.decode('utf-8')
+            downloaded_data = response.content.decode("utf-8")
             df = pd.read_csv(StringIO(downloaded_data))
 
-            report_name = self.sf.query_all(f"SELECT Name FROM Report where Id = '{report_id}'")
-            report_name = report_name['records'][0]['Name']
+            report_name = self.sf.query_all(
+                f"SELECT Name FROM Report where Id = '{report_id}'"
+            )
+            report_name = report_name["records"][0]["Name"]
 
             return df, report_name
 
@@ -73,16 +82,19 @@ class SalesforceConnection:
                 logging.error(f"Error during data extraction: {e}")
             raise SalesforceExtractionError(f"Error during data extraction: {e}")
 
-    def query(self, query, log_errors=True):
+    def query(self, log_errors=True):
         if not isinstance(query, str):
             raise ValueError("Query must be a string.")
 
         if not self.sf:
             self.connect()
+            querys = []
 
             try:
-                result = self.sf.query_all(query)
-                return result
+                for name, query in self.querys.items():
+                    result = name, self.sf.query_all(query)["records"]
+                    querys.append(result)
+                return querys
             except SalesforceAuthenticationFailed as e:
                 if log_errors:
                     logging.error(f"Authentication error: {e}")
@@ -94,6 +106,6 @@ class SalesforceConnection:
             except Exception as e:
                 if log_errors:
                     logging.error(f"Unexpected error during query execution: {e}")
-                raise SalesforceExtractionError(f"Unexpected error during query execution: {e}")
-
-   
+                raise SalesforceExtractionError(
+                    f"Unexpected error during query execution: {e}"
+                )
